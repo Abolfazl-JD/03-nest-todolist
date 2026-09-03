@@ -1,28 +1,32 @@
-import { CallHandler, ExecutionContext, NestInterceptor, UseInterceptors } from "@nestjs/common";
-import { plainToInstance } from "class-transformer";
-import { map, Observable } from "rxjs";
+import {
+  CallHandler,
+  ExecutionContext,
+  NestInterceptor,
+  UseInterceptors,
+} from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { Observable, map } from 'rxjs';
 
-// type of class
-interface classConstructor {
-    new (...args : any[]) : {}
+type ClassConstructor<T> = new (...args: any[]) => T;
+
+export function Serialize<T>(dto: ClassConstructor<T>) {
+  return UseInterceptors(new SerializeInterceptor(dto));
 }
 
-export function Serialize(dto: classConstructor) {
-    return UseInterceptors(new SerializeInterceptor(dto))    
-}
+export class SerializeInterceptor<T> implements NestInterceptor {
+  constructor(private readonly dto: ClassConstructor<T>) {}
 
-export class SerializeInterceptor implements NestInterceptor{
-    constructor(private dto : classConstructor){}
-
-    intercept(context: ExecutionContext, next: CallHandler<any>): Observable<any> | Promise<Observable<any>> {
-
-        return next.handle().pipe(
-            map((data: any) => {
-                return plainToInstance(this.dto, data, {
-                    excludeExtraneousValues: true,
-                    enableImplicitConversion : true
-                })
-            })
-        )
-    }
+  intercept(
+    _context: ExecutionContext,
+    next: CallHandler,
+  ): Observable<T | T[]> {
+    return next.handle().pipe(
+      map((data) =>
+        plainToInstance(this.dto, data, {
+          excludeExtraneousValues: true,
+          enableImplicitConversion: true,
+        }),
+      ),
+    );
+  }
 }

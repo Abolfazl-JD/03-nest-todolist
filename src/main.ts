@@ -1,14 +1,16 @@
-import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+
 import { AppModule } from './app.module';
-const cookieSession = require('cookie-session')
+import { configureApp } from './app.setup';
+import { setupSwagger } from './swagger';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  app.use(cookieSession({
-    keys : ['82f_-#1ff4fffs/b,;dahduidfa*^$jkdaad81']
-  }))
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true }))
-  await app.listen(3000);
+  const app = configureApp(await NestFactory.create(AppModule));
+  setupSwagger(app);
+
+  const port = process.env.PORT ?? 3000;
+  await app.listen(port);
+  console.log(`API listening on http://localhost:${port}/api/v1`);
+  console.log(`API docs at      http://localhost:${port}/api/docs`);
 }
-bootstrap();
+void bootstrap();

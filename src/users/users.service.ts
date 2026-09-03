@@ -1,60 +1,91 @@
-import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { compare, genSalt, hash } from 'bcrypt';
 import { Repository } from 'typeorm';
-import { LoginUserDto } from './dtos/login-user.dto';
+
 import { RegisterUserDto } from './dtos/register-user.dto';
-import { User } from './user.entity';
-import { compare, genSalt, hash } from 'bcrypt'
 import { UpdateUserDto } from './dtos/update-user.dto';
+import { User } from './user.entity';
+
+const BCRYPT_ROUNDS = 10;
 
 @Injectable()
 export class UsersService {
+  constructor(
+    @InjectRepository(User) private readonly usersRepository: Repository<User>,
+  ) {}
 
-    constructor(@InjectRepository(User) private usersRepository: Repository<User>){}
-
-    async registerUser(userInfo: RegisterUserDto) {
-        userInfo.password = await this.encryptPassword(userInfo.password)
-        return this.usersRepository.save(userInfo)
+  async createUser(userInfo: RegisterUserDto): Promise<User> {
+    const existing = await this.findByEmail(userInfo.email);
+    if (existing) {
+      throw new ConflictException('An account with this email already exists');
     }
 
-    async loginUser(userInfo: LoginUserDto) {
-        const { gmail, password } = userInfo
-        if (!gmail || !password) throw new BadRequestException('Invalid credentials')
-        
-        const user = await this.usersRepository.findOneBy({ gmail })
-        if (!user) throw new UnauthorizedException('there is no account with this gmail')
-        
-        await this.checkPassword(password, user.password)
-        
-        return user
+    const user = this.usersRepository.create({
+      ...userInfo,
+      password: await this.hashPassword(userInfo.password),
+    });
+
+    return this.usersRepository.save(user);
+  }
+
+  findByEmail(email: string): Promise<User | null> {
+    return this.usersRepository.findOneBy({ email });
+  }
+
+  findById(id: number): Promise<User | null> {
+    return this.usersRepository.findOneBy({ id });
+  }
+
+  async getById(id: number): Promise<User> {
+    const user = await this.findById(id);
+    if (!user) {
+      throw new NotFoundException(`No user found with id ${id}`);
+    }
+    return user;
+  }
+
+  async updateUser(userId: number, changes: UpdateUserDto): Promise<User> {
+    const user = await this.getById(userId);
+    const { password, oldPassword, ...rest } = changes;
+
+    const updated: Partial<User> = { ...rest };
+
+    if (rest.email !== undefined && rest.email !== user.email) {
+      const clash = await this.findByEmail(rest.email);
+      if (clash) {
+        throw new ConflictException(
+          'An account with this email already exists',
+        );
+      }
     }
 
-    async updateUser(userId: number, updatedUser: UpdateUserDto) {
-        const { oldPassword } = updatedUser
-        // find the user
-        const user = await this.getSingleUserById(userId)
-        // check the old password if try to edit password
-        if (oldPassword) {
-            await this.checkPassword(oldPassword, user.password)
-            updatedUser.password = await this.encryptPassword(updatedUser.password)
-        }
-        // edit user
-        return this.usersRepository.save({...user, ...updatedUser})
+    if (password !== undefined) {
+      if (!oldPassword) {
+        throw new UnauthorizedException(
+          'The current password is required to set a new one',
+        );
+      }
+      await this.verifyPassword(oldPassword, user.password);
+      updated.password = await this.hashPassword(password);
     }
 
-    async checkPassword(passToCheck: string, encryptedPass: string) {
-        const isPasswordCorrect = await compare(passToCheck, encryptedPass)
-        if(!isPasswordCorrect) throw new UnauthorizedException('password incorrect')
-    }
+    return this.usersRepository.save({ ...user, ...updated });
+  }
 
-    async encryptPassword(password: string) {
-        const salt = await genSalt(10)
-        return hash(password, salt)
+  async verifyPassword(plain: string, hashed: string): Promise<void> {
+    if (!(await compare(plain, hashed))) {
+      throw new UnauthorizedException('Invalid email or password');
     }
+  }
 
-    async getSingleUserById(id: number) {
-        const user = await this.usersRepository.findOneBy({ id })
-        if (!user) throw new NotFoundException(`user with id ${id} wasnot found`)
-        return user
-    }
+  async hashPassword(password: string): Promise<string> {
+    const salt = await genSalt(BCRYPT_ROUNDS);
+    return hash(password, salt);
+  }
 }
