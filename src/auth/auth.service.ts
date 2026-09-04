@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 
 import { NotificationsService } from '../notifications/notifications.service';
@@ -15,6 +15,8 @@ export interface AuthResult {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
@@ -23,7 +25,16 @@ export class AuthService {
 
   async register(userInfo: RegisterUserDto): Promise<AuthResult> {
     const user = await this.usersService.createUser(userInfo);
-    await this.notificationsService.notifyWelcome(user.id, user.username);
+
+    try {
+      await this.notificationsService.notifyWelcome(user.id, user.username);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to send welcome notification for user ${user.id}`,
+        error instanceof Error ? error.stack : error,
+      );
+    }
+
     return { user, accessToken: this.issueToken(user) };
   }
 

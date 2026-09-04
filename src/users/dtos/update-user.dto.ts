@@ -7,6 +7,8 @@ import {
   ValidateIf,
 } from 'class-validator';
 
+import { LowercaseEmail } from './lowercase-email.decorator';
+
 export class UpdateUserDto {
   @IsOptional()
   @MinLength(1)
@@ -15,6 +17,7 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsEmail()
+  @LowercaseEmail()
   email?: string;
 
   @IsOptional()

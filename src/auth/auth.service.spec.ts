@@ -62,6 +62,19 @@ describe('AuthService', () => {
     expect(notifications.notifyWelcome).toHaveBeenCalledWith(1, 'ann');
   });
 
+  it('still returns a token when the welcome notification fails', async () => {
+    notifications.notifyWelcome.mockRejectedValue(new Error('db is locked'));
+
+    const result = await service.register({
+      username: 'ann',
+      email: 'ann@example.com',
+      password: 'password123',
+    });
+
+    expect(result.accessToken).toBe('signed.jwt.token');
+    expect(result.user).toBe(existing);
+  });
+
   it('issues a token on a successful login', async () => {
     users.findByEmail.mockResolvedValue(existing);
 

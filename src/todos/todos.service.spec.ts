@@ -140,11 +140,6 @@ describe('TodosService', () => {
       );
     });
 
-    // Regression test for the bug this feature could otherwise reintroduce:
-    // updateTodo mutates the loaded entity in place via Object.assign, so the
-    // "was it already done" check must be captured before that mutation, not
-    // read off the object afterward -- otherwise a todo that is already done
-    // would look like it "just became done" on every subsequent update.
     it('does not re-notify when an already-done todo is updated again', async () => {
       repo.findOne.mockResolvedValue(existingTodo({ done: true }));
 
@@ -177,6 +172,20 @@ describe('TodosService', () => {
 
       expect(notifications.clearPendingReminders).not.toHaveBeenCalled();
       expect(notifications.notifyTodoCompleted).not.toHaveBeenCalled();
+    });
+
+    it('still returns the saved todo when notifying fails', async () => {
+      repo.findOne.mockResolvedValue(existingTodo({ done: false }));
+      notifications.clearPendingReminders.mockRejectedValue(
+        new Error('db is locked'),
+      );
+      notifications.notifyTodoCompleted.mockRejectedValue(
+        new Error('db is locked'),
+      );
+
+      const result = await service.updateTodo(5, { done: true }, OWNER);
+
+      expect(result.done).toBe(true);
     });
   });
 

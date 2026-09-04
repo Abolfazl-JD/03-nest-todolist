@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -19,6 +19,8 @@ export interface PaginatedTodos {
 
 @Injectable()
 export class TodosService {
+  private readonly logger = new Logger(TodosService.name);
+
   constructor(
     @InjectRepository(Todo) private readonly todosRepository: Repository<Todo>,
     private readonly categoriesService: CategoriesService,
@@ -124,13 +126,30 @@ export class TodosService {
     const justCompleted = saved.done && !wasDone;
 
     if (dueDateChanged || justCompleted) {
-      await this.notificationsService.clearPendingReminders(todoId, ownerId);
+      await this.tryNotify(
+        () => this.notificationsService.clearPendingReminders(todoId, ownerId),
+        `Failed to clear reminders for todo ${todoId}`,
+      );
     }
     if (justCompleted) {
-      await this.notificationsService.notifyTodoCompleted(saved, ownerId);
+      await this.tryNotify(
+        () => this.notificationsService.notifyTodoCompleted(saved, ownerId),
+        `Failed to send completion notification for todo ${todoId}`,
+      );
     }
 
     return saved;
+  }
+
+  private async tryNotify(
+    action: () => Promise<unknown>,
+    warning: string,
+  ): Promise<void> {
+    try {
+      await action();
+    } catch (error) {
+      this.logger.warn(warning, error instanceof Error ? error.stack : error);
+    }
   }
 
   async deleteTodo(todoId: number, ownerId: number): Promise<void> {

@@ -60,6 +60,25 @@ describe('Authentication (e2e)', () => {
     }).expect(409);
   });
 
+  it('treats email as case-insensitive for both duplicates and login', async () => {
+    await signup({
+      username: 'casey',
+      email: 'Casey@Example.com',
+      password: 'password123',
+    }).expect(201);
+
+    await signup({
+      username: 'casey2',
+      email: 'casey@example.com',
+      password: 'password123',
+    }).expect(409);
+
+    await login({
+      email: 'CASEY@EXAMPLE.COM',
+      password: 'password123',
+    }).expect(200);
+  });
+
   it('rejects a weak or malformed signup with 400', async () => {
     await signup({
       username: 'x',
