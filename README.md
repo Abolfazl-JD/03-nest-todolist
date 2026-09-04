@@ -24,7 +24,8 @@ clone, `npm install`, `npm run start:dev`.
 
 ## Quick start
 
-Requires **Node.js 20 or newer** (developed on Node 24).
+Requires **Node.js 24 or newer**. Earlier versions can run the app itself, but
+cannot run the test suite — see [Known limitations](#known-limitations).
 
 ```bash
 git clone <repository-url>
@@ -421,5 +422,12 @@ Honest notes on what this project does not do.
 - **Dependency advisories are clean today, not forever.** `npm audit` reports
   zero vulnerabilities as of the last update, but that is a statement about a
   moment in time; re-run it before submitting.
-- **Jest needs `--experimental-vm-modules`** because NestJS 12 is ESM-only.
-  The flag is applied by the npm scripts, so `npm test` works as-is.
+- **Jest needs Node 24, not just the `--experimental-vm-modules` flag.**
+  NestJS 12 ships ESM-only, and Jest's compiled test files reach it through a
+  plain `require()`. That only works on a Node version with stable
+  `require(esm)` support: Node 20 doesn't have it at all, and Node 22.12.0 was
+  found to fail with a distinct Node-internal bug (`ERR_REQUIRE_CYCLE_MODULE`)
+  when this was checked directly — Node 24 was the only version tested here
+  that runs the suite reliably. This is why CI and `package.json`'s `engines`
+  field both pin to Node 24 rather than the wider range Nest itself supports;
+  the app runs fine on Node 20 on its own, only the test suite cannot.
