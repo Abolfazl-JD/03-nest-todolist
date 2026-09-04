@@ -13,6 +13,14 @@ export function validateEnv(
     errors.push('JWT_EXPIRES_IN must be a string such as "1d" or "3600s"');
   }
 
+  const dueSoonWindow = config.DUE_SOON_WINDOW_HOURS;
+  if (
+    dueSoonWindow !== undefined &&
+    (Number.isNaN(Number(dueSoonWindow)) || Number(dueSoonWindow) <= 0)
+  ) {
+    errors.push('DUE_SOON_WINDOW_HOURS must be a positive number of hours');
+  }
+
   if (errors.length > 0) {
     throw new Error(
       `Invalid environment configuration:\n  - ${errors.join('\n  - ')}`,

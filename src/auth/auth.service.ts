@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 
+import { NotificationsService } from '../notifications/notifications.service';
 import { LoginUserDto } from '../users/dtos/login-user.dto';
 import { RegisterUserDto } from '../users/dtos/register-user.dto';
 import { User } from '../users/user.entity';
@@ -17,10 +18,12 @@ export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async register(userInfo: RegisterUserDto): Promise<AuthResult> {
     const user = await this.usersService.createUser(userInfo);
+    await this.notificationsService.notifyWelcome(user.id, user.username);
     return { user, accessToken: this.issueToken(user) };
   }
 

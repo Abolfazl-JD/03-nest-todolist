@@ -3,6 +3,7 @@ import { mkdirSync } from 'fs';
 import { DataSourceOptions } from 'typeorm';
 
 import { Category } from '../categories/category.entity';
+import { Notification } from '../notifications/notification.entity';
 import { Todo } from '../todos/todo.entity';
 import { User } from '../users/user.entity';
 import { migrations } from '../migrations';
@@ -25,7 +26,7 @@ export const buildDatabaseOptions = (
   return {
     type: 'better-sqlite3',
     database,
-    entities: [User, Todo, Category],
+    entities: [User, Todo, Category, Notification],
     migrations,
     synchronize: false,
     ...overrides,

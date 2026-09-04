@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { CategoriesService } from '../categories/categories.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateTodoDto } from './dtos/create-todo.dto';
 import { QueryTodosDto } from './dtos/query-todos.dto';
 import { UpdateTodoDto } from './dtos/update-todo.dto';
@@ -21,6 +22,7 @@ export class TodosService {
   constructor(
     @InjectRepository(Todo) private readonly todosRepository: Repository<Todo>,
     private readonly categoriesService: CategoriesService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async getTodos(
@@ -101,6 +103,8 @@ export class TodosService {
     ownerId: number,
   ): Promise<Todo> {
     const todo = await this.getSingleTodo(todoId, ownerId);
+    const wasDone = todo.done;
+    const previousDueDate = todo.dueDate;
     const { categoryId, dueDate, ...rest } = taskInfo;
 
     Object.assign(todo, rest);
@@ -112,7 +116,21 @@ export class TodosService {
       todo.category = await this.resolveCategory(categoryId, ownerId);
     }
 
-    return this.todosRepository.save(todo);
+    const saved = await this.todosRepository.save(todo);
+
+    const dueDateChanged =
+      (previousDueDate?.getTime() ?? null) !==
+      (saved.dueDate?.getTime() ?? null);
+    const justCompleted = saved.done && !wasDone;
+
+    if (dueDateChanged || justCompleted) {
+      await this.notificationsService.clearPendingReminders(todoId, ownerId);
+    }
+    if (justCompleted) {
+      await this.notificationsService.notifyTodoCompleted(saved, ownerId);
+    }
+
+    return saved;
   }
 
   async deleteTodo(todoId: number, ownerId: number): Promise<void> {

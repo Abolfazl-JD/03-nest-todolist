@@ -103,6 +103,7 @@ fails immediately rather than on the first login.
 | `JWT_EXPIRES_IN` | no | `1d` | Token lifetime, e.g. `3600s`, `12h`, `7d` |
 | `DATABASE_PATH` | no | `data/university-project.sqlite` | SQLite file; `:memory:` for an ephemeral database |
 | `PORT` | no | `3000` | Port to listen on |
+| `DUE_SOON_WINDOW_HOURS` | no | `24` | How far ahead a todo's due date counts as "due soon" |
 
 `.env` is git-ignored. Only `.env.example` is committed.
 
@@ -185,6 +186,56 @@ It returns an envelope:
 }
 ```
 
+### Notifications
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/notifications` | List, with filtering and pagination |
+| `PATCH` | `/notifications/:id/read` | Mark one read |
+| `PATCH` | `/notifications/read-all` | Mark all unread ones read, returns `{ "updated": number }` |
+| `DELETE` | `/notifications/:id` | Delete one (`204`) |
+
+A notification is created when: a todo's due date is within
+`DUE_SOON_WINDOW_HOURS` (`due_soon`); a todo's due date has passed and it is
+still not done (`overdue`); a todo is marked done (`todo_completed`); or an
+account is created (`welcome`). The due-date checks run on a schedule (every
+five minutes) rather than being triggered by a request — the only logic in
+this codebase that runs outside one.
+
+`GET /notifications` accepts:
+
+| Parameter | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `page` | integer ≥ 1 | `1` | |
+| `limit` | integer 1–100 | `10` | |
+| `unreadOnly` | boolean | — | |
+| `type` | `due_soon` \| `overdue` \| `todo_completed` \| `welcome` | — | |
+
+Same pagination envelope as `GET /todos`:
+
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "type": "due_soon",
+      "message": "\"write thesis\" is due soon",
+      "readAt": null,
+      "createdAt": "2026-09-03T08:00:00.000Z",
+      "todo": { "id": 4 }
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "limit": 10,
+  "totalPages": 1
+}
+```
+
+`todo` is `null` for a `welcome` notification. There is no `GET
+/notifications/:id` — list-and-toggle-read is the whole requirement, unlike
+Todos/Categories, which are primary editable resources.
+
 ### Status codes
 
 | Code | When |
@@ -204,6 +255,7 @@ src/
 ├── users/          user entity, profile routes
 ├── todos/          todo entity, querying
 ├── categories/     category entity
+├── notifications/  notification entity, in-app event log, due-date scan
 ├── config/         database options, environment validation
 ├── migrations/     schema history, listed explicitly in index.ts
 ├── decorators/     @CurrentUser()
@@ -214,7 +266,11 @@ src/
 
 Each feature is a NestJS module owning its entity, service and controller.
 Controllers handle HTTP only; all rules live in the services, which is what
-makes them straightforward to unit test.
+makes them straightforward to unit test. `NotificationsService` is the one
+exception with a method that isn't request-driven: `scanDueDates` also runs
+on a `@Cron()` schedule, but the scheduled method is a one-line wrapper around
+a plain, directly-callable method, so it's tested the same way as everything
+else — by calling it and asserting on the result, not by mocking a timer.
 
 Two pieces are worth pointing out:
 
@@ -235,7 +291,9 @@ identity out of the URL or body.
 erDiagram
     USER ||--o{ TODO : owns
     USER ||--o{ CATEGORY : owns
+    USER ||--o{ NOTIFICATION : receives
     CATEGORY ||--o{ TODO : groups
+    TODO ||--o{ NOTIFICATION : "referenced by"
 
     USER {
         int id PK
@@ -257,11 +315,22 @@ erDiagram
         int userId FK
         int categoryId FK "nullable"
     }
+    NOTIFICATION {
+        int id PK
+        string type "due_soon | overdue | todo_completed | welcome"
+        string message
+        datetime readAt "nullable"
+        datetime createdAt
+        int userId FK
+        int todoId FK "nullable"
+    }
 ```
 
-Deleting a user cascades to their todos and categories. Deleting a category
-sets its todos' `categoryId` to `NULL`, so tasks are never lost by tidying up
-categories.
+Deleting a user cascades to their todos, categories and notifications.
+Deleting a category sets its todos' `categoryId` to `NULL`, so tasks are never
+lost by tidying up categories — but deleting a todo cascades to its
+notifications, since a notification about a todo that no longer exists has no
+value.
 
 Schema changes are made through migrations (`src/migrations/`), never
 `synchronize`, so the schema history is reviewable and reversible.
@@ -271,18 +340,22 @@ Schema changes are made through migrations (`src/migrations/`), never
 ## Testing
 
 ```bash
-npm test          # 57 tests: unit + end-to-end
+npm test          # 88 tests: unit + end-to-end
 npm run test:cov  # with coverage (~95% of statements)
 ```
 
 **Unit tests** mock the repository and cover service decisions in isolation:
 password hashing, duplicate detection, owner scoping, query construction and
-priority ranking.
+priority ranking. The due-date scan is tested the same way — a fixed `now` is
+passed directly to `scanDueDates`, so its unit tests need no real waiting and
+never touch the scheduler.
 
 **End-to-end tests** drive the real application over HTTP against a fresh
 in-memory SQLite database per file. Because the schema is created by running
 the migrations, every test run also verifies that the migrations apply
-cleanly.
+cleanly. The notifications e2e suite triggers the due-date scan directly
+(`app.get(NotificationsService).scanDueDates()`) rather than waiting for the
+cron tick.
 
 Both bugs described below have explicit regression tests, so they cannot
 return unnoticed.
@@ -299,7 +372,8 @@ up by id alone, so any logged-in user could read, change or delete another
 user's todos by guessing an id. Every service method is now scoped to an owner
 id, and a resource belonging to someone else returns **404 rather than 403** —
 a 403 would confirm that the id exists and let a caller enumerate other
-people's data.
+people's data. This isn't a todos-specific patch; it's the standing rule every
+resource added since (categories, notifications) follows from the start.
 
 **2. Unauthenticated password overwrite.** `PATCH /users/:id` had no guard, and
 the old-password check ran only when `oldPassword` was present. A request that
@@ -335,6 +409,12 @@ Honest notes on what this project does not do.
   token.
 - **No rate limiting** on login, so it offers no protection against
   brute-force guessing. `@nestjs/throttler` would be the natural fix.
+- **Due-date notifications can lag up to five minutes** behind the actual
+  threshold crossing, since the scan runs on a fixed schedule rather than
+  reacting to time passing. A todo whose due date moves after a reminder was
+  already sent gets a fresh reminder on the next scan, since the old one is
+  cleared — but an already-read reminder is cleared too, so it won't remain as
+  history once that happens.
 - **SQLite** suits a single-process application. Concurrent writers would be a
   reason to move to PostgreSQL; the repository layer would not change, only
   `src/config/database.config.ts` and the migration dialect.

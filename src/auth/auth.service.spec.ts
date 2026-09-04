@@ -2,6 +2,7 @@ import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 
+import { NotificationsService } from '../notifications/notifications.service';
 import { User } from '../users/user.entity';
 import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
@@ -10,6 +11,7 @@ describe('AuthService', () => {
   let service: AuthService;
   let users: Record<string, jest.Mock>;
   let jwt: { sign: jest.Mock };
+  let notifications: { notifyWelcome: jest.Mock };
 
   const existing = {
     id: 1,
@@ -25,12 +27,14 @@ describe('AuthService', () => {
       verifyPassword: jest.fn(() => Promise.resolve()),
     };
     jwt = { sign: jest.fn(() => 'signed.jwt.token') };
+    notifications = { notifyWelcome: jest.fn(() => Promise.resolve()) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         AuthService,
         { provide: UsersService, useValue: users },
         { provide: JwtService, useValue: jwt },
+        { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
 
@@ -46,6 +50,16 @@ describe('AuthService', () => {
 
     expect(result.accessToken).toBe('signed.jwt.token');
     expect(jwt.sign).toHaveBeenCalledWith({ sub: 1, email: 'ann@example.com' });
+  });
+
+  it('sends a welcome notification on signup', async () => {
+    await service.register({
+      username: 'ann',
+      email: 'ann@example.com',
+      password: 'password123',
+    });
+
+    expect(notifications.notifyWelcome).toHaveBeenCalledWith(1, 'ann');
   });
 
   it('issues a token on a successful login', async () => {

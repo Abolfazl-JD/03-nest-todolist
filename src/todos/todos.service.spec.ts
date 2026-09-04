@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 
 import { CategoriesService } from '../categories/categories.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { QueryTodosDto } from './dtos/query-todos.dto';
 import { Todo } from './todo.entity';
 import { TodoPriority } from './todo-priority.enum';
@@ -32,6 +33,10 @@ describe('TodosService', () => {
   let service: TodosService;
   let repo: Record<string, jest.Mock>;
   let categories: { getCategory: jest.Mock };
+  let notifications: {
+    clearPendingReminders: jest.Mock;
+    notifyTodoCompleted: jest.Mock;
+  };
   let qb: Record<string, jest.Mock>;
 
   beforeEach(async () => {
@@ -45,12 +50,17 @@ describe('TodosService', () => {
       createQueryBuilder: jest.fn(() => qb),
     };
     categories = { getCategory: jest.fn() };
+    notifications = {
+      clearPendingReminders: jest.fn(() => Promise.resolve()),
+      notifyTodoCompleted: jest.fn(() => Promise.resolve()),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         TodosService,
         { provide: getRepositoryToken(Todo), useValue: repo },
         { provide: CategoriesService, useValue: categories },
+        { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
 
@@ -102,6 +112,71 @@ describe('TodosService', () => {
       await service.addTodo({ title: 'task', categoryId: 9 }, OWNER);
 
       expect(categories.getCategory).toHaveBeenCalledWith(9, OWNER);
+    });
+  });
+
+  describe('notifications', () => {
+    const existingTodo = (overrides: Partial<Todo> = {}): Todo =>
+      ({
+        id: 5,
+        title: 'write thesis',
+        done: false,
+        dueDate: new Date('2026-06-15T00:00:00.000Z'),
+        ...overrides,
+      }) as Todo;
+
+    it('notifies and clears reminders when a todo becomes done', async () => {
+      repo.findOne.mockResolvedValue(existingTodo({ done: false }));
+
+      await service.updateTodo(5, { done: true }, OWNER);
+
+      expect(notifications.clearPendingReminders).toHaveBeenCalledWith(
+        5,
+        OWNER,
+      );
+      expect(notifications.notifyTodoCompleted).toHaveBeenCalledWith(
+        expect.objectContaining({ done: true }),
+        OWNER,
+      );
+    });
+
+    // Regression test for the bug this feature could otherwise reintroduce:
+    // updateTodo mutates the loaded entity in place via Object.assign, so the
+    // "was it already done" check must be captured before that mutation, not
+    // read off the object afterward -- otherwise a todo that is already done
+    // would look like it "just became done" on every subsequent update.
+    it('does not re-notify when an already-done todo is updated again', async () => {
+      repo.findOne.mockResolvedValue(existingTodo({ done: true }));
+
+      await service.updateTodo(5, { done: true }, OWNER);
+
+      expect(notifications.clearPendingReminders).not.toHaveBeenCalled();
+      expect(notifications.notifyTodoCompleted).not.toHaveBeenCalled();
+    });
+
+    it('clears reminders when the due date changes, without a completion notice', async () => {
+      repo.findOne.mockResolvedValue(existingTodo());
+
+      await service.updateTodo(
+        5,
+        { dueDate: '2026-07-01T00:00:00.000Z' },
+        OWNER,
+      );
+
+      expect(notifications.clearPendingReminders).toHaveBeenCalledWith(
+        5,
+        OWNER,
+      );
+      expect(notifications.notifyTodoCompleted).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when an unrelated field changes', async () => {
+      repo.findOne.mockResolvedValue(existingTodo());
+
+      await service.updateTodo(5, { title: 'renamed' }, OWNER);
+
+      expect(notifications.clearPendingReminders).not.toHaveBeenCalled();
+      expect(notifications.notifyTodoCompleted).not.toHaveBeenCalled();
     });
   });
 

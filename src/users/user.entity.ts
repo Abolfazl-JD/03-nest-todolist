@@ -1,5 +1,6 @@
 import { Column, Entity, PrimaryGeneratedColumn, OneToMany } from 'typeorm';
 import { Category } from '../categories/category.entity';
+import { Notification } from '../notifications/notification.entity';
 import { Todo } from '../todos/todo.entity';
 
 @Entity('users')
@@ -21,4 +22,7 @@ export class User {
 
   @OneToMany(() => Category, (category) => category.user)
   categories: Category[];
+
+  @OneToMany(() => Notification, (notification) => notification.user)
+  notifications: Notification[];
 }
